@@ -1,6 +1,7 @@
 import asyncio
 import json
 import heapq
+from typing import Optional
 
 from asyncio.streams import StreamReader, StreamWriter
 from datetime import datetime, timedelta
@@ -20,9 +21,10 @@ class Server:
         self.clients_online = []
         self.client_counter = {}
 
-        self.banned_users = []  # tuple (<banned_until: datetime>, <user:User>)
+        self.banned_users: Optional[list[tuple[datetime, User]]] = []
 
         self.messages = []
+        self.N_MESSAGES = NUMBER_OF_HISTORY_MESSAGES
 
         try:
             asyncio.run(self.listen())
@@ -48,7 +50,7 @@ class Server:
         logger.info('Client connected from %s', address)
         curr_client = None
         user = None
-        writer.write('Hello! Welcome to our chat-server. You can register or connect.'.encode('utf-8'))
+        self.send_message(writer, 'Hello! Welcome to our chat-server. You can register or connect.')
 
         try:
             while True:
@@ -66,7 +68,7 @@ class Server:
                     try:
                         nick, password = args
                     except Exception as e:
-                        writer.write(f'{e}\nWrong command format'.encode('utf-8'))
+                        self.send_message(writer, f'{e}\nWrong command format')
                         continue
 
                     if command == 'register':
@@ -84,13 +86,12 @@ class Server:
                                 reader=reader
                             )
                             self.clients_online.append(curr_client)
-                            writer.write(f'Hello, {nick}! You are registered! Welcome!'.encode('utf-8'))
-                            logger.info(f'Hello, {nick}! You are registered! Welcome!')
+                            self.send_message(writer, f'Hello, {nick}! You are registered! Welcome!')
+                            logger.info('%s has been registered.', nick)
                             # send N last messages
-                            N_messages = '\n'.join(self.messages[-NUMBER_OF_HISTORY_MESSAGES:])
-                            writer.write(N_messages.encode('utf-8'))
+                            self.send_N_last_messages(writer)
                         else:
-                            writer.write('This nickname is taken already'.encode('utf-8'))
+                            self.send_message(writer, 'This nickname is taken already')
                             continue
                     elif command == 'connect':
                         if nick in self.users and self.users[nick].password == password:
@@ -103,31 +104,30 @@ class Server:
                                 reader=reader
                             )
                             self.clients_online.append(curr_client)
-                            writer.write(f'Hello, {nick}! You are logged in! Welcome!'.encode('utf-8'))
-                            logger.info(f'Hello, {nick}! You are logged in! Welcome!')
+                            self.send_message(writer, f'Hello, {nick}! You are logged in! Welcome!')
+                            logger.info('%s has been logged in', nick)
                             # send N last messages
-                            N_messages = '\n'.join(self.messages[-NUMBER_OF_HISTORY_MESSAGES:])
-                            writer.write(N_messages.encode('utf-8'))
+                            self.send_N_last_messages(writer)
                         else:
-                            writer.write('Wrong nickname or password'.encode('utf-8'))
+                            self.send_message(writer, 'Wrong nickname or password')
                             continue
                 elif command == 'message':
                     if user and not user.is_banned:
                         message = f'[{user.nickname} says] {args}'
                         for client in self.clients_online:
-                            client.writer.write(message.encode('utf-8'))
+                            self.send_message(client.writer, message)
                         self.messages.append(message)
                         logger.info(message)
                     if user.is_banned:
-                        curr_client.writer.write('You are banned'.encode('utf-8'))
+                        self.send_message(curr_client.writer, 'You are banned')
                 elif command == 'strike':
                     if user and not user.is_banned:
                         striked_nickname = args
                         if striked_nickname not in self.users:
-                            curr_client.writer.write('There is no such user'.encode('utf-8'))
+                            self.send_message(curr_client.writer, 'There is no such user')
                             continue
                         if self.users[striked_nickname].is_banned:
-                            curr_client.writer.write('User is already banned'.encode('utf-8'))
+                            self.send_message(curr_client.writer, 'User is already banned')
                             continue
                         self.users[striked_nickname].strikes += 1
                         # ban actions
@@ -145,7 +145,7 @@ class Server:
 
                             self.users[striked_nickname].is_banned = True
                 else:
-                    writer.write('Unknown command'.encode('utf-8'))
+                    self.send_message(writer, 'Unknown command')
                     continue
                 await writer.drain()
         except ConnectionError:
@@ -160,6 +160,14 @@ class Server:
                 if not self.client_counter[user.nickname]:
                     self.users_online.remove(user.nickname)
         writer.close()
+
+    def send_message(self, writer: StreamWriter, message: str):
+        writer.write(message.encode('utf-8'))
+
+    def send_N_last_messages(self, writer: StreamWriter):
+        messages = '\n'.join(self.messages[-self.N_MESSAGES:])
+        self.send_message(writer, messages)
+
 
     async def unban(self):
         while self.banned_users:
