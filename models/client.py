@@ -1,16 +1,12 @@
 from asyncio.streams import StreamReader, StreamWriter
+from dataclasses import dataclass
 from typing import Any
 
+from models.user import User
+
+@dataclass
 class Client:
-    def __init__(
-            self,
-            nickname: str,
-            address: Any,
-            writer: StreamWriter,
-            reader: StreamReader
-        ):
-        self.nickname = nickname
-        self.address = address
-        self.writer = writer
-        self.reader = reader
+    user: User
+    writer: StreamWriter
+    reader: StreamReader
     

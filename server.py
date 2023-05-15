@@ -3,7 +3,7 @@ import asyncio
 from asyncio.streams import StreamReader, StreamWriter
 from typing import Union
 
-from config import logger
+from config import logger, NUMBER_OF_HISTORY_MESSAGES
 from models.client import Client
 
 
@@ -16,16 +16,19 @@ class Server:
         # change to dict ?
         self.clients_online: set[Client] = set()
 
-        self.users = (
-            'nick1',
-            'nick2',
-            'nick3',
-        )
+        self.users = self.get_users()
 
         try:
             asyncio.run(self.listen())
         except OSError as err:
             logger.fatal(err)
+
+    def get_users(self):
+        return (
+            'nick1',
+            'nick2',
+            'nick3',
+        )
 
     async def listen(self):
         srv = await asyncio.start_server(
@@ -95,12 +98,12 @@ class Server:
         address = writer.get_extra_info('peername')
         logger.info('Client connected from %s', address)
 
-        nickname = await self.ask_for_nickname(reader, writer)
+        user = await self.ask_for_nickname(reader, writer)
 
-        current_client = Client(nickname, address, writer, reader)
+        current_client = Client(user, address, writer, reader)
         self.clients_online.add(current_client)
 
-        await self.send_last_N_messages(4, current_client)
+        await self.send_last_N_messages(NUMBER_OF_HISTORY_MESSAGES, current_client)
 
         await self.serve_client(current_client)
 
