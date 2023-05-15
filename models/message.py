@@ -3,6 +3,7 @@ from datetime import datetime
 
 from models.user import User
 
+
 @dataclass
 class Message:
     id: int

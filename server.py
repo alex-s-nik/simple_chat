@@ -7,6 +7,7 @@ from config import logger
 from models.client import Client
 from models.user import User
 
+
 class Server:
     def __init__(self, host="127.0.0.1", port=8000):
         self.host = host
@@ -18,7 +19,6 @@ class Server:
         self.client_counter = {}
 
         self.messages = []
-
 
         try:
             asyncio.run(self.listen())
@@ -39,7 +39,7 @@ class Server:
             self,
             reader: StreamReader,
             writer: StreamWriter
-        ):
+    ):
         address = writer.get_extra_info('peername')
         logger.info('Client connected from %s', address)
         curr_client = None
@@ -64,7 +64,7 @@ class Server:
                     except Exception as e:
                         writer.write(f'{e}\nWrong command format'.encode('utf-8'))
                         continue
-                    
+
                     if command == 'register':
                         if nick not in self.users:
                             user = User(
@@ -111,7 +111,6 @@ class Server:
                     if user and not user.is_banned:
                         message = f'[{user.nickname} says] {args}'
                         for client in self.clients_online:
-                            #if client != curr_client:
                             client.writer.write(message.encode('utf-8'))
                         self.messages.append(message)
                         logger.info(message)
@@ -145,5 +144,4 @@ class Server:
                 # remove from users online
                 if not self.client_counter[user.nickname]:
                     self.users_online.remove(user.nickname)
-                
         writer.close()

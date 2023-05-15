@@ -1,10 +1,10 @@
 import asyncio
-
 import json
 
 import aioconsole
 
 from config import logger
+
 
 class Client:
     def __init__(self, server_host="127.0.0.1", server_port=8000):
@@ -12,9 +12,11 @@ class Client:
         self.server_port = server_port
         self.url = f'http://{server_host}:{server_port}'
 
-    
     async def connect(self):
-        self.reader, self.writer = await asyncio.open_connection(self.server_host, self.server_port)
+        self.reader, self.writer = await asyncio.open_connection(
+            self.server_host,
+            self.server_port
+        )
         await asyncio.gather(
             self.send_messages(),
             self.get_messages()
@@ -26,12 +28,11 @@ class Client:
     def quit(self):
         asyncio.get_event_loop().stop()
 
-
     async def get_messages(self):
         while True:
             data = await self.reader.read(1024)
             logger.info(data.decode('utf-8'))
-    
+
     async def send_messages(self):
         while True:
 
@@ -54,7 +55,9 @@ class Client:
             elif command == '/register':
                 if len(action_args) != 2:
                     logger.info(action_args)
-                    logger.error('Register command needs exactly two args, nickname and password')
+                    logger.error(
+                        'Register command needs exactly two args, nickname and password'
+                    )
                     continue
                 payload = {
                     'command': 'register',
@@ -63,7 +66,9 @@ class Client:
 
             elif command == '/connect':
                 if len(action_args) != 2:
-                    logger.error('Connect command needs exactly two args, nickname and password')
+                    logger.error(
+                        'Connect command needs exactly two args, nickname and password'
+                    )
                     continue
                 payload = {
                     'command': 'connect',
@@ -87,7 +92,7 @@ class Client:
                     'command': 'strike',
                     'args': action_args[0]
                 }
-                
+
             else:
                 logger.error('%s is not supported.', command)
                 continue
