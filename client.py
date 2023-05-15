@@ -11,6 +11,7 @@ class Client:
         self.server_host = server_host
         self.server_port = server_port
         self.url = f'http://{server_host}:{server_port}'
+        asyncio.run(self.connect())
 
     async def connect(self):
         self.reader, self.writer = await asyncio.open_connection(
