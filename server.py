@@ -1,9 +1,11 @@
 import asyncio
 import json
+import heapq
 
 from asyncio.streams import StreamReader, StreamWriter
-from config import logger
+from datetime import datetime, timedelta
 
+from config import logger, NUMBER_OF_HISTORY_MESSAGES, TIME_TO_BAN
 from models.client import Client
 from models.user import User
 
@@ -17,6 +19,8 @@ class Server:
         self.users_online = set()
         self.clients_online = []
         self.client_counter = {}
+
+        self.banned_users = []  # tuple (<banned_until: datetime>, <user:User>)
 
         self.messages = []
 
@@ -83,7 +87,7 @@ class Server:
                             writer.write(f'Hello, {nick}! You are registered! Welcome!'.encode('utf-8'))
                             logger.info(f'Hello, {nick}! You are registered! Welcome!')
                             # send N last messages
-                            N_messages = '\n'.join(self.messages[-5:])
+                            N_messages = '\n'.join(self.messages[-NUMBER_OF_HISTORY_MESSAGES:])
                             writer.write(N_messages.encode('utf-8'))
                         else:
                             writer.write('This nickname is taken already'.encode('utf-8'))
@@ -102,7 +106,7 @@ class Server:
                             writer.write(f'Hello, {nick}! You are logged in! Welcome!'.encode('utf-8'))
                             logger.info(f'Hello, {nick}! You are logged in! Welcome!')
                             # send N last messages
-                            N_messages = '\n'.join(self.messages[-5:])
+                            N_messages = '\n'.join(self.messages[-NUMBER_OF_HISTORY_MESSAGES:])
                             writer.write(N_messages.encode('utf-8'))
                         else:
                             writer.write('Wrong nickname or password'.encode('utf-8'))
@@ -126,8 +130,19 @@ class Server:
                             curr_client.writer.write('User is already banned'.encode('utf-8'))
                             continue
                         self.users[striked_nickname].strikes += 1
+                        # ban actions
                         if self.users[striked_nickname].strikes >= 3:
-                            self.users[striked_nickname].strikes = 0
+                            # если забаненных нет, то корутина по разбану либо не запускалась, либо уже выполнилась
+                            # значит надо запустить её по новой
+                            need_to_start_unban = not bool(self.banned_users)
+                            heapq.heappush(
+                                self.banned_users,
+                                (datetime.now() + timedelta(seconds=TIME_TO_BAN),
+                                self.users[striked_nickname])
+                            )
+                            if need_to_start_unban:
+                                asyncio.create_task(self.unban())
+
                             self.users[striked_nickname].is_banned = True
                 else:
                     writer.write('Unknown command'.encode('utf-8'))
@@ -145,3 +160,11 @@ class Server:
                 if not self.client_counter[user.nickname]:
                     self.users_online.remove(user.nickname)
         writer.close()
+
+    async def unban(self):
+        while self.banned_users:
+            banned_until, banned_user = heapq.heappop(self.banned_users)
+            time_to_unban = banned_until - datetime.now()
+            await asyncio.sleep(time_to_unban.total_seconds())
+            banned_user.strikes = 0
+            banned_user.is_banned = False
