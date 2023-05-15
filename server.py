@@ -1,7 +1,6 @@
 import asyncio
 import json
 import heapq
-from typing import Optional
 
 from asyncio.streams import StreamReader, StreamWriter
 from datetime import datetime, timedelta
@@ -12,19 +11,27 @@ from models.user import User
 
 
 class Server:
+    """Chat server.
+    Clients may be connected to the server on <host>:<port>.
+    Client support next commands:
+        /register <nick> <pass> - register on the server.
+        /connect <nick> <pass> - connect to the chat.
+        /msg <message> - send message <message> to the chat.
+        /strike <nickname> - report a user with nickname <nickname>
+        /quit - close the connetcion to the server and close client."""
     def __init__(self, host="127.0.0.1", port=8000):
-        self.host = host
-        self.port = port
+        self.host: str = host
+        self.port: int = port
 
-        self.users = {}
-        self.users_online = set()
-        self.clients_online = []
-        self.client_counter = {}
+        self.users: dict[str, User] = {}  # <nickname>: <user>
+        self.users_online: set[User] = set()
+        self.clients_online: list[Client] = []
+        self.client_counter: dict[str, int] = {}  # <nickname>:<count> how much online clients of the user
 
-        self.banned_users: Optional[list[tuple[datetime, User]]] = []
+        self.banned_users: list[tuple[datetime, User]] = []
 
-        self.messages = []
-        self.N_MESSAGES = NUMBER_OF_HISTORY_MESSAGES
+        self.messages: list[str] = []
+        self.N_MESSAGES: int = NUMBER_OF_HISTORY_MESSAGES
 
         try:
             asyncio.run(self.listen())
@@ -59,7 +66,11 @@ class Server:
                     break
                 decoded_data = data.decode('utf-8')
                 logger.info(decoded_data)
-                decoded_data = json.loads(decoded_data)
+
+                try:
+                    decoded_data = json.loads(decoded_data)
+                except json.decoder.JSONDecodeError:
+                    self.send_message(writer, 'The using data transfer protocol is not supported.')
 
                 command = decoded_data['command']
                 args = decoded_data['args']
@@ -67,7 +78,7 @@ class Server:
                 if command == 'register' or command == 'connect':
                     try:
                         nick, password = args
-                    except Exception as e:
+                    except ValueError as e:
                         self.send_message(writer, f'{e}\nWrong command format')
                         continue
 
@@ -132,8 +143,10 @@ class Server:
                         self.users[striked_nickname].strikes += 1
                         # ban actions
                         if self.users[striked_nickname].strikes >= 3:
-                            # если забаненных нет, то корутина по разбану либо не запускалась, либо уже выполнилась
-                            # значит надо запустить её по новой
+                            # if there are no banned users
+                            # then coro for unban or not started never or has already been executed
+                            # that means the coro must be start again
+
                             need_to_start_unban = not bool(self.banned_users)
                             heapq.heappush(
                                 self.banned_users,
@@ -151,12 +164,12 @@ class Server:
         except ConnectionError:
             logger.info('Client from %s has been disconnected', address)
             if curr_client:
-                # remove from online clients
+                # remove current client from online clients
                 self.clients_online.remove(curr_client)
-                # decrease counter of clients
+                # decrease counter of the clients
                 user = curr_client.user
                 self.client_counter[user.nickname] = self.client_counter.get(user.nickname, 1) - 1
-                # remove from users online
+                # remove the user from users online
                 if not self.client_counter[user.nickname]:
                     self.users_online.remove(user.nickname)
         writer.close()
@@ -170,6 +183,10 @@ class Server:
 
 
     async def unban(self):
+        """It using next idea for unban.
+        If the user been banned he is placed to the heap. 
+        On each step the app takes user with closer time to unban from heap
+        and unban him."""
         while self.banned_users:
             banned_until, banned_user = heapq.heappop(self.banned_users)
             time_to_unban = banned_until - datetime.now()
