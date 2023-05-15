@@ -1,34 +1,29 @@
 import asyncio
+import json
 
 from asyncio.streams import StreamReader, StreamWriter
-from typing import Union
+from config import logger
 
-from config import logger, NUMBER_OF_HISTORY_MESSAGES
 from models.client import Client
-
+from models.user import User
 
 class Server:
     def __init__(self, host="127.0.0.1", port=8000):
         self.host = host
         self.port = port
 
-        self.messages = []
-        # change to dict ?
-        self.clients_online: set[Client] = set()
+        self.users = {}
+        self.users_online = set()
+        self.clients_online = []
+        self.client_counter = {}
 
-        self.users = self.get_users()
+        self.messages = []
+
 
         try:
             asyncio.run(self.listen())
         except OSError as err:
             logger.fatal(err)
-
-    def get_users(self):
-        return (
-            'nick1',
-            'nick2',
-            'nick3',
-        )
 
     async def listen(self):
         srv = await asyncio.start_server(
@@ -40,73 +35,115 @@ class Server:
         async with srv:
             await srv.serve_forever()
 
-    async def send_message(self, client: Union[Client, StreamWriter], message: str, end='\n'):
-        stream_writer = client
-        if isinstance(client, Client):
-            stream_writer = client.writer
-        stream_writer.write(f'{message}{end}'.encode('utf-8'))
-        await stream_writer.drain()
-
-    async def send_to_clients(self, message: str, from_client: Client):
-        for client in self.clients_online:
-            if client == from_client:
-                continue
-            await self.send_message(client, message)
-
-    async def ask_for_nickname(
-        self,
-        client_reader: StreamReader,
-        client_writer: StreamWriter
-    ) -> str:
-        await self.send_message(client_writer, 'Tell us what is your nick >>> ', end='')
-
-        while True:
-            client_nick = (await client_reader.read(1024)).decode('utf-8').strip()
-            if client_nick in self.users:
-                break
-            logger.warning('Try to enter as %s', client_nick)
-            await self.send_message(client_writer, 'There is no such user. Try again >>>', end='')
-
-        await self.send_message(client_writer, f'Hello, {client_nick}! Lets start to chat!')
-
-        return client_nick
-    
-    async def send_last_N_messages(self, n: int, to_client: Client):
-        # if message wrote by curr_client prefix must be 'I say' instead 'Says'
-        if not self.messages:
-            message = 'There is no message history'
-        else:
-            message = '\n'.join(self.messages[-n:])
-
-        await self.send_message(to_client, message)
-
-    async def serve_client(self, client: Client):
-        while True:
-            data = await client.reader.read(1024)
-            if not data:
-                break
-            message = data.decode('utf-8').strip()
-            prepared_message = f'{client.nickname} says: {message}'
-            self.messages.append(message)
-            logger.info(prepared_message)
-            await self.send_to_clients(message=prepared_message, from_client=client)
-
     async def client_connected(
-            self, reader: StreamReader,
+            self,
+            reader: StreamReader,
             writer: StreamWriter
         ):
         address = writer.get_extra_info('peername')
         logger.info('Client connected from %s', address)
+        curr_client = None
+        user = None
+        writer.write('Hello! Welcome to our chat-server. You can register or connect.'.encode('utf-8'))
 
-        user = await self.ask_for_nickname(reader, writer)
+        try:
+            while True:
+                data = await reader.read(1024)
+                if not data:
+                    break
+                decoded_data = data.decode('utf-8')
+                logger.info(decoded_data)
+                decoded_data = json.loads(decoded_data)
 
-        current_client = Client(user, address, writer, reader)
-        self.clients_online.add(current_client)
+                command = decoded_data['command']
+                args = decoded_data['args']
 
-        await self.send_last_N_messages(NUMBER_OF_HISTORY_MESSAGES, current_client)
-
-        await self.serve_client(current_client)
-
-        logger.info('Client from %s has been disconnected', address)
-        self.clients_online.remove(current_client)
+                if command == 'register' or command == 'connect':
+                    try:
+                        nick, password = args
+                    except Exception as e:
+                        writer.write(f'{e}\nWrong command format'.encode('utf-8'))
+                        continue
+                    
+                    if command == 'register':
+                        if nick not in self.users:
+                            user = User(
+                                nickname=nick,
+                                password=password
+                            )
+                            self.users[nick] = user
+                            self.users_online.add(nick)
+                            self.client_counter[nick] = self.client_counter.get(nick, 0) + 1
+                            curr_client = Client(
+                                user=user,
+                                writer=writer,
+                                reader=reader
+                            )
+                            self.clients_online.append(curr_client)
+                            writer.write(f'Hello, {nick}! You are registered! Welcome!'.encode('utf-8'))
+                            logger.info(f'Hello, {nick}! You are registered! Welcome!')
+                            # send N last messages
+                            N_messages = '\n'.join(self.messages[-5:])
+                            writer.write(N_messages.encode('utf-8'))
+                        else:
+                            writer.write('This nickname is taken already'.encode('utf-8'))
+                            continue
+                    elif command == 'connect':
+                        if nick in self.users and self.users[nick].password == password:
+                            user = self.users[nick]
+                            self.users_online.add(nick)
+                            self.client_counter[nick] = self.client_counter.get(nick, 0) + 1
+                            curr_client = Client(
+                                user=user,
+                                writer=writer,
+                                reader=reader
+                            )
+                            self.clients_online.append(curr_client)
+                            writer.write(f'Hello, {nick}! You are logged in! Welcome!'.encode('utf-8'))
+                            logger.info(f'Hello, {nick}! You are logged in! Welcome!')
+                            # send N last messages
+                            N_messages = '\n'.join(self.messages[-5:])
+                            writer.write(N_messages.encode('utf-8'))
+                        else:
+                            writer.write('Wrong nickname or password'.encode('utf-8'))
+                            continue
+                elif command == 'message':
+                    if user and not user.is_banned:
+                        message = f'[{user.nickname} says] {args}'
+                        for client in self.clients_online:
+                            #if client != curr_client:
+                            client.writer.write(message.encode('utf-8'))
+                        self.messages.append(message)
+                        logger.info(message)
+                    if user.is_banned:
+                        curr_client.writer.write('You are banned'.encode('utf-8'))
+                elif command == 'strike':
+                    if user and not user.is_banned:
+                        striked_nickname = args
+                        if striked_nickname not in self.users:
+                            curr_client.writer.write('There is no such user'.encode('utf-8'))
+                            continue
+                        if self.users[striked_nickname].is_banned:
+                            curr_client.writer.write('User is already banned'.encode('utf-8'))
+                            continue
+                        self.users[striked_nickname].strikes += 1
+                        if self.users[striked_nickname].strikes >= 3:
+                            self.users[striked_nickname].strikes = 0
+                            self.users[striked_nickname].is_banned = True
+                else:
+                    writer.write('Unknown command'.encode('utf-8'))
+                    continue
+                await writer.drain()
+        except ConnectionError:
+            logger.info('Client from %s has been disconnected', address)
+            if curr_client:
+                # remove from online clients
+                self.clients_online.remove(curr_client)
+                # decrease counter of clients
+                user = curr_client.user
+                self.client_counter[user.nickname] = self.client_counter.get(user.nickname, 1) - 1
+                # remove from users online
+                if not self.client_counter[user.nickname]:
+                    self.users_online.remove(user.nickname)
+                
         writer.close()
