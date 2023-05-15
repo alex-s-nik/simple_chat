@@ -83,6 +83,8 @@ class Server:
                             writer.write(f'Hello, {nick}! You are registered! Welcome!'.encode('utf-8'))
                             logger.info(f'Hello, {nick}! You are registered! Welcome!')
                             # send N last messages
+                            N_messages = '\n'.join(self.messages[-5:])
+                            writer.write(N_messages.encode('utf-8'))
                         else:
                             writer.write('This nickname is taken already'.encode('utf-8'))
                             continue
@@ -100,6 +102,8 @@ class Server:
                             writer.write(f'Hello, {nick}! You are logged in! Welcome!'.encode('utf-8'))
                             logger.info(f'Hello, {nick}! You are logged in! Welcome!')
                             # send N last messages
+                            N_messages = '\n'.join(self.messages[-5:])
+                            writer.write(N_messages.encode('utf-8'))
                         else:
                             writer.write('Wrong nickname or password'.encode('utf-8'))
                             continue
@@ -111,6 +115,8 @@ class Server:
                             client.writer.write(message.encode('utf-8'))
                         self.messages.append(message)
                         logger.info(message)
+                    if user.is_banned:
+                        curr_client.writer.write('You are banned'.encode('utf-8'))
                 elif command == 'strike':
                     if user and not user.is_banned:
                         striked_nickname = args
