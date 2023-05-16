@@ -60,11 +60,9 @@ class Server:
         self.send_message(writer, 'Hello! Welcome to our chat-server. You can register or connect.')
 
         try:
-            while True:
-                data = await reader.read(1024)
-                if not data:
-                    break
-                decoded_data = data.decode('utf-8')
+            while data := await reader.readline():
+
+                decoded_data = data.decode('utf-8').strip()
                 logger.info(decoded_data)
 
                 try:
@@ -79,7 +77,7 @@ class Server:
                     try:
                         nick, password = args
                     except ValueError as e:
-                        self.send_message(writer, f'{e}\nWrong command format')
+                        self.send_message(writer, f'{e}\nWrong command format.')
                         continue
 
                     if command == 'register':
@@ -102,7 +100,7 @@ class Server:
                             # send N last messages
                             self.send_N_last_messages(writer)
                         else:
-                            self.send_message(writer, 'This nickname is taken already')
+                            self.send_message(writer, 'This nickname is taken already.')
                             continue
                     elif command == 'connect':
                         if nick in self.users and self.users[nick].password == password:
@@ -120,25 +118,28 @@ class Server:
                             # send N last messages
                             self.send_N_last_messages(writer)
                         else:
-                            self.send_message(writer, 'Wrong nickname or password')
+                            self.send_message(writer, 'Wrong nickname or password.')
                             continue
                 elif command == 'message':
-                    if user and not user.is_banned:
-                        message = f'[{user.nickname} says] {args}'
-                        for client in self.clients_online:
-                            self.send_message(client.writer, message)
-                        self.messages.append(message)
-                        logger.info(message)
+                    if not user:
+                        self.send_message(writer, 'You are not logged in. Your message is not delivered.')
+                        continue
                     if user.is_banned:
-                        self.send_message(curr_client.writer, 'You are banned')
+                        self.send_message(curr_client.writer, 'You are banned.')
+                        continue
+                    message = f'[{user.nickname} says] {args}'
+                    for client in self.clients_online:
+                        self.send_message(client.writer, message)
+                    self.messages.append(message)
+                    logger.info(message)
                 elif command == 'strike':
                     if user and not user.is_banned:
                         striked_nickname = args
                         if striked_nickname not in self.users:
-                            self.send_message(curr_client.writer, 'There is no such user')
+                            self.send_message(curr_client.writer, 'There is no such user.')
                             continue
                         if self.users[striked_nickname].is_banned:
-                            self.send_message(curr_client.writer, 'User is already banned')
+                            self.send_message(curr_client.writer, 'User is already banned.')
                             continue
                         self.users[striked_nickname].strikes += 1
                         # ban actions
@@ -158,11 +159,11 @@ class Server:
 
                             self.users[striked_nickname].is_banned = True
                 else:
-                    self.send_message(writer, 'Unknown command')
+                    self.send_message(writer, 'Unknown command.')
                     continue
                 await writer.drain()
         except ConnectionError:
-            logger.info('Client from %s has been disconnected', address)
+            logger.info('Client from %s has been disconnected.', address)
             if curr_client:
                 # remove current client from online clients
                 self.clients_online.remove(curr_client)
@@ -175,7 +176,7 @@ class Server:
         writer.close()
 
     def send_message(self, writer: StreamWriter, message: str):
-        writer.write(message.encode('utf-8'))
+        writer.write(f'{message}\n'.encode('utf-8'))
 
     def send_N_last_messages(self, writer: StreamWriter):
         messages = '\n'.join(self.messages[-self.n_last_messages:])

@@ -24,15 +24,14 @@ class Client:
         )
 
     def send(self, message=""):
-        self.writer.write(message.encode())
+        self.writer.write(f'{message}\n'.encode('utf-8'))
 
     def quit(self):
         asyncio.get_event_loop().stop()
 
     async def get_messages(self):
-        while True:
-            data = await self.reader.read(1024)
-            logger.info(data.decode('utf-8'))
+        while data := await self.reader.readline():
+            logger.info(data.decode('utf-8').strip())
 
     async def send_messages(self):
         while True:
