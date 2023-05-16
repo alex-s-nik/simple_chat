@@ -31,7 +31,7 @@ class Server:
         self.banned_users: list[tuple[datetime, User]] = []
 
         self.messages: list[str] = []
-        self.N_MESSAGES: int = NUMBER_OF_HISTORY_MESSAGES
+        self.n_last_messages: int = NUMBER_OF_HISTORY_MESSAGES
 
         try:
             asyncio.run(self.listen())
@@ -178,7 +178,7 @@ class Server:
         writer.write(message.encode('utf-8'))
 
     def send_N_last_messages(self, writer: StreamWriter):
-        messages = '\n'.join(self.messages[-self.N_MESSAGES:])
+        messages = '\n'.join(self.messages[-self.n_last_messages:])
         self.send_message(writer, messages)
 
 
