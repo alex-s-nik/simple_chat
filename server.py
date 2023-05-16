@@ -45,6 +45,7 @@ class Server:
         self.messages: list[str] = []
         self.n_last_messages: int = NUMBER_OF_HISTORY_MESSAGES
 
+    def run(self):
         try:
             asyncio.run(self.listen())
         except OSError as err:

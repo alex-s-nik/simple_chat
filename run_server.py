@@ -1,4 +1,5 @@
 from server import Server
 
 if __name__ == '__main__':
-    Server()
+    server = Server()
+    server.run()
