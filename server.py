@@ -4,8 +4,20 @@ import heapq
 
 from asyncio.streams import StreamReader, StreamWriter
 from datetime import datetime, timedelta
+from typing import Optional
 
 from config import logger, NUMBER_OF_HISTORY_MESSAGES, TIME_TO_BAN
+from exceptions import (
+    BaseChatException,
+    UserAlreadyExistsChatException,
+    UnknownCommandException,
+    UnknownDataProtocolException,
+    UserIsBannedException,
+    UserNotFoundException,
+    UserNotLoggedInException,
+    WrongCommandFormatChatException,
+    WrongUsernameOrPasswordException
+)
 from models.client import Client
 from models.user import User
 
@@ -59,121 +71,69 @@ class Server:
         user = None
         self.send_message(writer, 'Hello! Welcome to our chat-server. You can register or connect.')
 
-        try:
-            while data := await reader.readline():
-
+        while data := await reader.readline():
+            try:
                 decoded_data = data.decode('utf-8').strip()
                 logger.info(decoded_data)
 
                 try:
                     decoded_data = json.loads(decoded_data)
                 except json.decoder.JSONDecodeError:
-                    self.send_message(writer, 'The using data transfer protocol is not supported.')
+                    raise UnknownDataProtocolException(
+                        'The using data transfer protocol is not supported.'
+                    )
 
                 command = decoded_data['command']
                 args = decoded_data['args']
 
-                if command == 'register' or command == 'connect':
+                if command == 'register':
                     try:
                         nick, password = args
                     except ValueError as e:
-                        self.send_message(writer, f'{e}\nWrong command format.')
-                        continue
+                        raise WrongCommandFormatChatException(
+                            f'{e}\nWrong command format.'
+                        )
+                    curr_client, user = self.command_register(nick, password, reader, writer)
 
-                    if command == 'register':
-                        if nick not in self.users:
-                            user = User(
-                                nickname=nick,
-                                password=password
-                            )
-                            self.users[nick] = user
-                            self.users_online.add(nick)
-                            self.client_counter[nick] = self.client_counter.get(nick, 0) + 1
-                            curr_client = Client(
-                                user=user,
-                                writer=writer,
-                                reader=reader
-                            )
-                            self.clients_online.append(curr_client)
-                            self.send_message(writer, f'Hello, {nick}! You are registered! Welcome!')
-                            logger.info('%s has been registered.', nick)
-                            # send N last messages
-                            self.send_N_last_messages(writer)
-                        else:
-                            self.send_message(writer, 'This nickname is taken already.')
-                            continue
-                    elif command == 'connect':
-                        if nick in self.users and self.users[nick].password == password:
-                            user = self.users[nick]
-                            self.users_online.add(nick)
-                            self.client_counter[nick] = self.client_counter.get(nick, 0) + 1
-                            curr_client = Client(
-                                user=user,
-                                writer=writer,
-                                reader=reader
-                            )
-                            self.clients_online.append(curr_client)
-                            self.send_message(writer, f'Hello, {nick}! You are logged in! Welcome!')
-                            logger.info('%s has been logged in', nick)
-                            # send N last messages
-                            self.send_N_last_messages(writer)
-                        else:
-                            self.send_message(writer, 'Wrong nickname or password.')
-                            continue
+                elif command == 'connect':
+                    try:
+                        nick, password = args
+                    except ValueError as e:
+                        raise WrongCommandFormatChatException(
+                            f'{e}\nWrong command format.'
+                        )
+                    curr_client, user = self.command_connect(nick, password, reader, writer)
+
                 elif command == 'message':
-                    if not user:
-                        self.send_message(writer, 'You are not logged in. Your message is not delivered.')
-                        continue
-                    if user.is_banned:
-                        self.send_message(curr_client.writer, 'You are banned.')
-                        continue
-                    message = f'[{user.nickname} says] {args}'
-                    for client in self.clients_online:
-                        self.send_message(client.writer, message)
-                    self.messages.append(message)
-                    logger.info(message)
+                    message = args
+                    self.command_message(user, message)
+                    
                 elif command == 'strike':
-                    if user and not user.is_banned:
-                        striked_nickname = args
-                        if striked_nickname not in self.users:
-                            self.send_message(curr_client.writer, 'There is no such user.')
-                            continue
-                        if self.users[striked_nickname].is_banned:
-                            self.send_message(curr_client.writer, 'User is already banned.')
-                            continue
-                        self.users[striked_nickname].strikes += 1
-                        # ban actions
-                        if self.users[striked_nickname].strikes >= 3:
-                            # if there are no banned users
-                            # then coro for unban or not started never or has already been executed
-                            # that means the coro must be start again
-
-                            need_to_start_unban = not bool(self.banned_users)
-                            heapq.heappush(
-                                self.banned_users,
-                                (datetime.now() + timedelta(seconds=TIME_TO_BAN),
-                                self.users[striked_nickname])
-                            )
-                            if need_to_start_unban:
-                                asyncio.create_task(self.unban())
-
-                            self.users[striked_nickname].is_banned = True
+                    user_for_strike = args
+                    self.command_strike(
+                        complaining_user=user,
+                        user_for_strike=user_for_strike
+                    )
                 else:
-                    self.send_message(writer, 'Unknown command.')
-                    continue
-                await writer.drain()
-        except ConnectionError:
-            logger.info('Client from %s has been disconnected.', address)
-            if curr_client:
-                # remove current client from online clients
-                self.clients_online.remove(curr_client)
-                # decrease counter of the clients
-                user = curr_client.user
-                self.client_counter[user.nickname] = self.client_counter.get(user.nickname, 1) - 1
-                # remove the user from users online
-                if not self.client_counter[user.nickname]:
-                    self.users_online.remove(user.nickname)
+                    raise UnknownCommandException(
+                        'Unknown command.'
+                    )
+            except BaseChatException as e:
+                self.send_message(writer, f'An error has occurred: {e}')
+
+            await writer.drain()
+
         writer.close()
+        logger.info('Client from %s has been disconnected.', address)
+        if curr_client:
+            # remove current client from online clients
+            self.clients_online.remove(curr_client)
+            # decrease counter of the clients
+            user = curr_client.user
+            self.client_counter[user.nickname] = self.client_counter.get(user.nickname, 1) - 1
+            # remove the user from users online
+            if not self.client_counter[user.nickname]:
+                self.users_online.remove(user.nickname)
 
     def send_message(self, writer: StreamWriter, message: str):
         writer.write(f'{message}\n'.encode('utf-8'))
@@ -194,3 +154,125 @@ class Server:
             await asyncio.sleep(time_to_unban.total_seconds())
             banned_user.strikes = 0
             banned_user.is_banned = False
+
+    def command_register(
+            self,
+            nick: str,
+            password: str,
+            reader: StreamReader,
+            writer: StreamWriter
+    ) -> tuple[Client, User]:
+
+        if nick in self.users:
+            raise UserAlreadyExistsChatException(
+                'This nickname is taken already.'
+            )
+        user = User(
+            nickname=nick,
+            password=password
+        )
+        self.users[nick] = user
+        self.users_online.add(nick)
+        self.client_counter[nick] = self.client_counter.get(nick, 0) + 1
+        curr_client = Client(
+            user=user,
+            writer=writer,
+            reader=reader
+        )
+        self.clients_online.append(curr_client)
+        self.send_message(writer, f'Hello, {nick}! You are registered! Welcome!')
+        logger.info('%s has been registered.', nick)
+        # send N last messages
+        self.send_N_last_messages(writer)
+
+        return curr_client, user
+
+
+    def command_connect(
+            self,
+            nick: str,
+            password: str,
+            reader: StreamReader,
+            writer: StreamWriter
+    ) -> tuple[Client, User]:
+        if nick not in self.users or self.users[nick].password != password:
+            raise WrongUsernameOrPasswordException(
+                'Wrong nickname or password.'
+            )
+
+        user = self.users[nick]
+        self.users_online.add(nick)
+        self.client_counter[nick] = self.client_counter.get(nick, 0) + 1
+        curr_client = Client(
+            user=user,
+            writer=writer,
+            reader=reader
+        )
+        self.clients_online.append(curr_client)
+        self.send_message(writer, f'Hello, {nick}! You are logged in! Welcome!')
+        logger.info('%s has been logged in', nick)
+        # send N last messages
+        self.send_N_last_messages(writer)
+
+        return curr_client, user
+
+    def command_message(
+        self,
+        from_user: Optional[User],
+        message: str
+    ) -> None:
+        user = from_user
+        if not user:
+            raise UserNotLoggedInException(
+                'You are not logged in. Your message is not delivered.'
+            )
+        if user.is_banned:
+            raise UserIsBannedException(
+                'You are banned.'
+            )
+        message = f'[{user.nickname} says] {message}'
+        for client in self.clients_online:
+            self.send_message(client.writer, message)
+        self.messages.append(message)
+        logger.info(message)
+
+    def command_strike(
+            self,
+            complaining_user: Optional[User],
+            user_for_strike: Optional[User]
+        ) -> None:
+
+        if not complaining_user:
+            raise UserNotLoggedInException(
+                'You are not logged in. You cant strike someone.'
+            )
+        if complaining_user.is_banned:
+            raise UserIsBannedException(
+                'You are banned.'
+            )
+        
+        if user_for_strike not in self.users:
+            raise UserNotFoundException(
+                'There is no such user.'
+            )
+        if self.users[user_for_strike].is_banned:
+            raise UserIsBannedException(
+                'User is already banned.'
+            )
+        self.users[user_for_strike].strikes += 1
+        # ban actions
+        if self.users[user_for_strike].strikes >= 3:
+            # if there are no banned users
+            # then coro for unban or not started never or has already been executed
+            # that means the coro must be start again
+
+            need_to_start_unban = not bool(self.banned_users)
+            heapq.heappush(
+                self.banned_users,
+                (datetime.now() + timedelta(seconds=TIME_TO_BAN),
+                self.users[user_for_strike])
+            )
+            if need_to_start_unban:
+                asyncio.create_task(self.unban())
+
+            self.users[user_for_strike].is_banned = True
