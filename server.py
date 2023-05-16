@@ -107,7 +107,7 @@ class Server:
                 elif command == 'message':
                     message = args
                     self.command_message(user, message)
-                    
+
                 elif command == 'strike':
                     user_for_strike = args
                     self.command_strike(
@@ -142,10 +142,9 @@ class Server:
         messages = '\n'.join(self.messages[-self.n_last_messages:])
         self.send_message(writer, messages)
 
-
     async def unban(self):
         """It using next idea for unban.
-        If the user been banned he is placed to the heap. 
+        If the user been banned he is placed to the heap.
         On each step the app takes user with closer time to unban from heap
         and unban him."""
         while self.banned_users:
@@ -186,7 +185,6 @@ class Server:
         self.send_N_last_messages(writer)
 
         return curr_client, user
-
 
     def command_connect(
             self,
@@ -240,7 +238,7 @@ class Server:
             self,
             complaining_user: Optional[User],
             user_for_strike: Optional[User]
-        ) -> None:
+    ) -> None:
 
         if not complaining_user:
             raise UserNotLoggedInException(
@@ -250,7 +248,7 @@ class Server:
             raise UserIsBannedException(
                 'You are banned.'
             )
-        
+
         if user_for_strike not in self.users:
             raise UserNotFoundException(
                 'There is no such user.'
@@ -269,8 +267,10 @@ class Server:
             need_to_start_unban = not bool(self.banned_users)
             heapq.heappush(
                 self.banned_users,
-                (datetime.now() + timedelta(seconds=TIME_TO_BAN),
-                self.users[user_for_strike])
+                (
+                    datetime.now() + timedelta(seconds=TIME_TO_BAN),
+                    self.users[user_for_strike]
+                )
             )
             if need_to_start_unban:
                 asyncio.create_task(self.unban())

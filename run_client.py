@@ -1,4 +1,3 @@
-import asyncio
 from client import Client
 
 
