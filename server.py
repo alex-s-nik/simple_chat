@@ -25,12 +25,12 @@ from models.user import User
 class Server:
     """Chat server.
     Clients may be connected to the server on <host>:<port>.
-    Client support next commands:
+    Client supports the next commands:
         /register <nick> <pass> - register on the server.
         /connect <nick> <pass> - connect to the chat.
         /msg <message> - send message <message> to the chat.
-        /strike <nickname> - report a user with nickname <nickname>
-        /quit - close the connetcion to the server and close client."""
+        /strike <nickname> - report about the user with nickname <nickname>
+        /quit - close the connection to the server and close client."""
     def __init__(self, host="127.0.0.1", port=8000):
         self.host: str = host
         self.port: int = port
